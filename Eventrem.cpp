@@ -31,6 +31,8 @@ public:
 
 class TaskManager {
     vector<Task> taskList;
+    unordered_map<string, int> nameToIndex;     // Task name → index in vector
+    multimap<string, int> dateToTaskIndex;      // Task date → list of indexes
 
     bool isValidDate(const string& date) {
         if (date.length() != 10 || date[4] != '-' || date[7] != '-') return false;
@@ -47,6 +49,11 @@ public:
         cout << "Enter task name: ";
         cin.ignore();
         getline(cin, name);
+        if (nameToIndex.count(name)) {
+            cout << "Task with this name already exists.\n";
+            return;
+        }
+
         cout << "Enter task details: ";
         getline(cin, details);
         cout << "Enter date (yyyy-mm-dd): ";
@@ -55,12 +62,18 @@ public:
             cout << "Invalid date format!" << endl;
             return;
         }
+
         cout << "Assign to (press Enter for Unassigned): ";
         cin.ignore();
         getline(cin, assign);
         if (assign.empty()) assign = "Unassigned";
 
-        taskList.emplace_back(name, details, date, assign);
+        Task t(name, details, date, assign);
+        taskList.push_back(t);
+        int idx = taskList.size() - 1;
+        nameToIndex[name] = idx;
+        dateToTaskIndex.insert({date, idx});
+
         cout << "Task added successfully!" << endl;
         checkClash(date);
     }
@@ -94,7 +107,33 @@ public:
         cout << "Enter task number to delete (0 to cancel): ";
         cin >> index;
         if (index <= 0 || index > taskList.size()) return;
+
+        string name = taskList[index - 1].getName();
+        string date = taskList[index - 1].getDate();
+
+        // Erase from multimap
+        auto range = dateToTaskIndex.equal_range(date);
+        for (auto it = range.first; it != range.second; ++it) {
+            if (it->second == index - 1) {
+                dateToTaskIndex.erase(it);
+                break;
+            }
+        }
+
+        // Erase from map
+        nameToIndex.erase(name);
+
+        // Erase from list
         taskList.erase(taskList.begin() + index - 1);
+
+        // Rebuild maps because indexes shifted
+        nameToIndex.clear();
+        dateToTaskIndex.clear();
+        for (int i = 0; i < taskList.size(); i++) {
+            nameToIndex[taskList[i].getName()] = i;
+            dateToTaskIndex.insert({taskList[i].getDate(), i});
+        }
+
         cout << "Task deleted!" << endl;
     }
 
@@ -117,6 +156,9 @@ public:
         if (index <= 0 || index > taskList.size()) return;
 
         Task& t = taskList[index - 1];
+        string oldName = t.getName();
+        string oldDate = t.getDate();
+
         string newDetails, newDate, newAssign;
 
         cout << "Enter new details: ";
@@ -136,14 +178,29 @@ public:
         t.setDetails(newDetails);
         t.setDate(newDate);
         t.setAssignedTo(newAssign);
+
+        // Update date index if date changed
+        if (newDate != oldDate) {
+            auto range = dateToTaskIndex.equal_range(oldDate);
+            for (auto it = range.first; it != range.second; ++it) {
+                if (it->second == index - 1) {
+                    dateToTaskIndex.erase(it);
+                    break;
+                }
+            }
+            dateToTaskIndex.insert({newDate, index - 1});
+        }
+
         cout << "Task updated successfully!" << endl;
         checkClash(newDate);
     }
 
     void checkClash(const string& date) {
+        auto range = dateToTaskIndex.equal_range(date);
         int count = 0;
-        for (auto& t : taskList) {
-            if (t.getDate() == date && !t.getStatus()) {
+        for (auto it = range.first; it != range.second; ++it) {
+            Task& t = taskList[it->second];
+            if (!t.getStatus()) {
                 if (count == 0)
                     cout << "Warning: Clashing tasks on " << date << ":\n";
                 cout << "- " << t.getName() << " (Assigned to: " << t.getAssignedTo() << ")\n";
